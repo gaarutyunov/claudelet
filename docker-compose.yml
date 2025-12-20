@@ -1,0 +1,58 @@
+version: "3.8"
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOST=0.0.0.0
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-to-a-secure-random-string}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL:-http://localhost:3001/api/auth/google/callback}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3001}
+      - DB_PATH=/data/claudelet.db
+      - WORKSPACE_BASE_PATH=/data/workspaces
+      - CLAUDE_CONFIG_PATH=/data/claude-config
+      - DOCKER_SOCKET_PATH=/var/run/docker.sock
+    volumes:
+      - claudelet-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Development only - runs Vite dev server
+  web-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+      target: builder
+    command: npm run dev:web
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app/web
+      - /app/web/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:3001
+    profiles:
+      - dev
+
+volumes:
+  claudelet-data:
+    driver: local
+
+networks:
+  default:
+    name: claudelet-network
