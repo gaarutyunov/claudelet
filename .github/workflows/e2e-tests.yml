@@ -1,0 +1,151 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main, claude/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e-tests:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shardIndex: [1, 2, 3, 4]
+        shardTotal: [4]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Get Playwright version
+        id: playwright-version
+        run: |
+          VERSION=$(node -e "console.log(require('./package-lock.json').packages['node_modules/@playwright/test']?.version || '1.48.0')")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Install Playwright deps only
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium firefox
+
+      - name: Build server
+        run: npm run build -w server
+
+      - name: Start mock server
+        run: |
+          npm run mock-server &
+          timeout 30 bash -c 'until curl -sf http://localhost:4010/health; do sleep 1; done'
+        env:
+          NODE_ENV: test
+
+      - name: Run E2E tests with PTY support
+        shell: 'script -q -e -c "bash {0}"'
+        run: npx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: test-secret-for-ci-minimum-32-characters-long
+          ANTHROPIC_BASE_URL: http://localhost:4010
+          OAUTH_ISSUER: http://localhost:8080
+          CI: true
+
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shardIndex }}
+          path: blob-report
+          retention-days: 1
+
+  merge-reports:
+    if: ${{ !cancelled() }}
+    needs: [e2e-tests]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge reports
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 14
+
+  # Separate job for visual regression tests
+  visual-tests:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build server
+        run: npm run build -w server
+
+      - name: Start mock server
+        run: |
+          npm run mock-server &
+          timeout 30 bash -c 'until curl -sf http://localhost:4010/health; do sleep 1; done'
+
+      - name: Run visual tests
+        shell: 'script -q -e -c "bash {0}"'
+        run: npx playwright test --grep @visual
+        env:
+          NODE_ENV: test
+          SESSION_SECRET: test-secret-for-ci-minimum-32-characters-long
+
+      - name: Upload visual diff artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: test-results/
+          retention-days: 7

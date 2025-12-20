@@ -14,11 +14,26 @@
     "build": "npm run build -w server && npm run build -w web",
     "start": "npm run start -w server",
     "lint": "npm run lint -w server && npm run lint -w web",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "mock-server": "tsx tests/mocks/server.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@pollyjs/adapter-node-http": "^6.0.6",
+    "@pollyjs/core": "^6.0.6",
+    "@pollyjs/persister-fs": "^6.0.6",
     "concurrently": "^8.2.2",
-    "typescript": "^5.3.3"
+    "msw": "^2.6.0",
+    "oauth2-mock-server": "^8.0.0",
+    "strip-ansi": "^7.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.0"
   },
   "engines": {
     "node": ">=20.0.0"

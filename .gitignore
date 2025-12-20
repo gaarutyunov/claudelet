@@ -38,6 +38,13 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Playwright
+playwright-report/
+playwright/.cache/
+test-results/
+blob-report/
+tests/.auth/
+
 # Misc
 *.pid
 *.seed
