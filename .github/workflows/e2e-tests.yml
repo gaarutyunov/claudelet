@@ -54,13 +54,6 @@ jobs:
       - name: Build server
         run: bun run build:server
 
-      - name: Start mock server
-        run: |
-          bun run mock-server &
-          timeout 30 bash -c 'until curl -sf http://localhost:4010/health; do sleep 1; done'
-        env:
-          NODE_ENV: test
-
       - name: Run E2E tests with PTY support
         shell: 'script -q -e -c "bash {0}"'
         run: bunx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
@@ -134,11 +127,6 @@ jobs:
 
       - name: Build server
         run: bun run build:server
-
-      - name: Start mock server
-        run: |
-          bun run mock-server &
-          timeout 30 bash -c 'until curl -sf http://localhost:4010/health; do sleep 1; done'
 
       - name: Run visual tests
         shell: 'script -q -e -c "bash {0}"'
