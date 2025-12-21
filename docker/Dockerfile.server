@@ -1,12 +1,14 @@
 # Claudelet Server Image
 FROM oven/bun:1.1.38-slim AS builder
 
-# Install build dependencies for native modules
+# Install build dependencies for native modules (node-pty, better-sqlite3)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
+    python3-pip \
     make \
     g++ \
     git \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -16,8 +18,8 @@ COPY package.json package-lock.json ./
 COPY server/package.json ./server/
 COPY web/package.json ./web/
 
-# Install dependencies (bun can use package-lock.json)
-RUN bun install
+# Install dependencies with native module support
+RUN bun install --frozen-lockfile || bun install
 
 # Copy source
 COPY . .
