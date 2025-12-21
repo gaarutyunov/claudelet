@@ -52,7 +52,7 @@ jobs:
         run: bunx playwright install-deps chromium firefox
 
       - name: Build server
-        run: bun run build -w server
+        run: bun run build:server
 
       - name: Start mock server
         run: |
@@ -133,7 +133,7 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Build server
-        run: bun run build -w server
+        run: bun run build:server
 
       - name: Start mock server
         run: |

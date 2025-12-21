@@ -25,7 +25,13 @@ export default defineConfig({
 
   webServer: [
     {
-      command: "npm run dev:server",
+      command: "bun run mock-server",
+      url: "http://localhost:4010/health",
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+    },
+    {
+      command: "bun run dev:server",
       url: "http://localhost:3001/api/health",
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
@@ -38,16 +44,10 @@ export default defineConfig({
       },
     },
     {
-      command: "npm run dev:web",
+      command: "bun run dev:web",
       url: "http://localhost:5173",
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
-    },
-    {
-      command: "npm run mock-server",
-      url: "http://localhost:4010/health",
-      reuseExistingServer: !process.env.CI,
-      timeout: 30000,
     },
   ],
 
