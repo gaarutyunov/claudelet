@@ -16,9 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd -g 1000 coder && \
-    useradd -u 1000 -g coder -m -s /bin/bash coder
+# Create non-root user (handle case where GID/UID 1000 already exists from node image)
+RUN if ! getent group coder > /dev/null 2>&1; then \
+        getent group 1000 > /dev/null 2>&1 && groupmod -n coder $(getent group 1000 | cut -d: -f1) || groupadd -g 1000 coder; \
+    fi && \
+    if ! id -u coder > /dev/null 2>&1; then \
+        id -u 1000 > /dev/null 2>&1 && usermod -l coder -d /home/coder -m $(id -nu 1000) || useradd -u 1000 -g coder -m -s /bin/bash coder; \
+    fi && \
+    mkdir -p /home/coder && chown -R 1000:1000 /home/coder
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
