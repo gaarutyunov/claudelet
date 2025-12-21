@@ -18,19 +18,6 @@ export function LoginPage() {
     )}`;
   };
 
-  const handleDevLogin = async () => {
-    try {
-      const response = await fetch("/api/auth/dev/login", { method: "POST" });
-      const data = await response.json();
-      if (data.token) {
-        useAuthStore.getState().setToken(data.token);
-        navigate("/");
-      }
-    } catch (error) {
-      console.error("Dev login failed:", error);
-    }
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="card max-w-md w-full mx-4">
@@ -66,15 +53,6 @@ export function LoginPage() {
             </svg>
             Sign in with Google
           </button>
-
-          {import.meta.env.DEV && (
-            <button
-              onClick={handleDevLogin}
-              className="btn btn-secondary w-full"
-            >
-              Development Login
-            </button>
-          )}
         </div>
 
         <p className="mt-6 text-xs text-neutral-500 text-center">

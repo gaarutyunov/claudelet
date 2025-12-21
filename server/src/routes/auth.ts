@@ -133,6 +133,15 @@ export async function setupAuthRoutes(fastify: FastifyInstance): Promise<void> {
         picture: string;
       };
 
+      // Check email whitelist
+      if (config.allowedEmails.length > 0) {
+        const emailLower = userInfo.email.toLowerCase();
+        if (!config.allowedEmails.includes(emailLower)) {
+          logger.warn({ email: userInfo.email }, "Login attempt from non-whitelisted email");
+          return reply.code(403).send({ error: "Access denied. Your email is not authorized." });
+        }
+      }
+
       // Find or create user
       let user = getUserByGoogleId(userInfo.id);
       if (!user) {
@@ -188,32 +197,4 @@ export async function setupAuthRoutes(fastify: FastifyInstance): Promise<void> {
       return { success: true };
     }
   );
-
-  // Dev-only: Create test user and session
-  if (config.nodeEnv === "development") {
-    fastify.post("/dev/login", async () => {
-      let user = getUserByEmail("dev@localhost");
-      if (!user) {
-        user = createUser({
-          id: nanoid(),
-          email: "dev@localhost",
-          name: "Development User",
-          picture: null,
-          google_id: null,
-        });
-      }
-
-      const sessionToken = crypto.randomBytes(32).toString("base64url");
-      const expiresAt = Math.floor(Date.now() / 1000) + config.sessionMaxAge / 1000;
-
-      createAuthSession({
-        id: nanoid(),
-        user_id: user.id,
-        token: sessionToken,
-        expires_at: expiresAt,
-      });
-
-      return { token: sessionToken, user };
-    });
-  }
 }

@@ -3,30 +3,35 @@
   "version": "0.1.0",
   "description": "Remote self-hosted Claude Code from anywhere",
   "private": true,
+  "type": "module",
   "workspaces": [
     "server",
     "web"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
-    "dev:server": "npm run dev -w server",
-    "dev:web": "npm run dev -w web",
-    "build": "npm run build -w server && npm run build -w web",
-    "start": "npm run start -w server",
-    "lint": "npm run lint -w server && npm run lint -w web",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
-    "test": "npm run test:unit && npm run test:e2e",
+    "dev": "concurrently \"bun run dev:server\" \"bun run dev:web\"",
+    "dev:server": "bun run dev -w server",
+    "dev:web": "bun run dev -w web",
+    "build": "bun run build:web && bun run build:server",
+    "build:web": "bun run build -w web",
+    "build:server": "bun run build -w server",
+    "build:binary": "bun run build && bun run scripts/build-binary.ts",
+    "start": "bun run server/dist/index.js",
+    "lint": "bun run lint -w server && bun run lint -w web",
+    "typecheck": "bun run typecheck -w server && bun run typecheck -w web",
+    "test": "bun run test:unit && bun run test:e2e",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "mock-server": "tsx tests/mocks/server.ts"
+    "mock-server": "bun run tests/mocks/server.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@pollyjs/adapter-node-http": "^6.0.6",
     "@pollyjs/core": "^6.0.6",
     "@pollyjs/persister-fs": "^6.0.6",
+    "@types/bun": "^1.1.0",
     "concurrently": "^8.2.2",
     "msw": "^2.6.0",
     "oauth2-mock-server": "^8.0.0",
@@ -35,7 +40,8 @@
     "typescript": "^5.3.3",
     "vitest": "^2.1.0"
   },
-  "engines": {
-    "node": ">=20.0.0"
-  }
+  "trustedDependencies": [
+    "better-sqlite3",
+    "node-pty"
+  ]
 }

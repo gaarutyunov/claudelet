@@ -3,7 +3,9 @@ import { Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "./stores/auth";
 import { LoginPage } from "./pages/Login";
 import { DashboardPage } from "./pages/Dashboard";
+import { ChatPage } from "./pages/Chat";
 import { TerminalPage } from "./pages/Terminal";
+import { RepositoriesPage } from "./pages/Repositories";
 
 function AuthCallback() {
   const [searchParams] = useSearchParams();
@@ -63,7 +65,23 @@ export default function App() {
         }
       />
       <Route
+        path="/repositories"
+        element={
+          <ProtectedRoute>
+            <RepositoriesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/session/:sessionId"
+        element={
+          <ProtectedRoute>
+            <ChatPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/session/:sessionId/terminal"
         element={
           <ProtectedRoute>
             <TerminalPage />

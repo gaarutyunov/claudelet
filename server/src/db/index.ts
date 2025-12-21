@@ -46,10 +46,34 @@ export async function initDatabase(): Promise<void> {
       created_at INTEGER DEFAULT (unixepoch())
     );
 
+    -- Git repositories table
+    CREATE TABLE IF NOT EXISTS repositories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      git_url TEXT NOT NULL,
+      default_branch TEXT DEFAULT 'main',
+      local_path TEXT NOT NULL,
+      created_at INTEGER DEFAULT (unixepoch()),
+      last_fetched_at INTEGER,
+      UNIQUE(user_id, git_url)
+    );
+
+    -- Workspaces table (repo + branch combinations)
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+      branch TEXT NOT NULL,
+      directory_path TEXT NOT NULL,
+      created_at INTEGER DEFAULT (unixepoch()),
+      UNIQUE(repository_id, branch)
+    );
+
     -- Terminal sessions table
     CREATE TABLE IF NOT EXISTS terminal_sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
       container_id TEXT,
       workspace_path TEXT NOT NULL,
       project_name TEXT,
@@ -80,7 +104,10 @@ export async function initDatabase(): Promise<void> {
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token);
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_repositories_user ON repositories(user_id);
+    CREATE INDEX IF NOT EXISTS idx_workspaces_repo ON workspaces(repository_id);
     CREATE INDEX IF NOT EXISTS idx_terminal_sessions_user ON terminal_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_terminal_sessions_workspace ON terminal_sessions(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user ON usage_logs(user_id);
     CREATE INDEX IF NOT EXISTS idx_oauth_states_created ON oauth_states(created_at);
   `);
@@ -189,6 +216,7 @@ export function deleteUserAuthSessions(userId: string): void {
 export interface TerminalSession {
   id: string;
   user_id: string;
+  workspace_id: string | null;
   container_id: string | null;
   workspace_path: string;
   project_name: string | null;
@@ -267,4 +295,111 @@ export function getUserUsage(userId: string, since?: number): { tokens_input: nu
     FROM usage_logs
     WHERE user_id = ? AND timestamp >= ?
   `).get(userId, sinceTs) as { tokens_input: number; tokens_output: number; cost_usd: number };
+}
+
+// Repository operations
+export interface Repository {
+  id: string;
+  user_id: string;
+  name: string;
+  git_url: string;
+  default_branch: string;
+  local_path: string;
+  created_at: number;
+  last_fetched_at: number | null;
+}
+
+export function createRepository(repo: Omit<Repository, "created_at" | "last_fetched_at">): Repository {
+  const stmt = getDb().prepare(`
+    INSERT INTO repositories (id, user_id, name, git_url, default_branch, local_path)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(repo.id, repo.user_id, repo.name, repo.git_url, repo.default_branch, repo.local_path);
+  return getRepository(repo.id)!;
+}
+
+export function getRepository(id: string): Repository | undefined {
+  return getDb().prepare("SELECT * FROM repositories WHERE id = ?").get(id) as Repository | undefined;
+}
+
+export function getRepositoryByUrl(userId: string, gitUrl: string): Repository | undefined {
+  return getDb().prepare("SELECT * FROM repositories WHERE user_id = ? AND git_url = ?").get(userId, gitUrl) as Repository | undefined;
+}
+
+export function getUserRepositories(userId: string): Repository[] {
+  return getDb().prepare(`
+    SELECT * FROM repositories WHERE user_id = ? ORDER BY name ASC
+  `).all(userId) as Repository[];
+}
+
+export function updateRepository(id: string, updates: Partial<Repository>): void {
+  const allowedFields = ["name", "default_branch", "last_fetched_at"];
+  const fields = Object.keys(updates).filter((k) => allowedFields.includes(k));
+  if (fields.length === 0) return;
+
+  const setClause = fields.map((f) => `${f} = ?`).join(", ");
+  const values = fields.map((f) => (updates as any)[f]);
+
+  getDb().prepare(`UPDATE repositories SET ${setClause} WHERE id = ?`).run(...values, id);
+}
+
+export function deleteRepository(id: string): void {
+  getDb().prepare("DELETE FROM repositories WHERE id = ?").run(id);
+}
+
+// Workspace operations
+export interface Workspace {
+  id: string;
+  repository_id: string;
+  branch: string;
+  directory_path: string;
+  created_at: number;
+}
+
+export interface WorkspaceWithRepo extends Workspace {
+  repo_name: string;
+  repo_git_url: string;
+}
+
+export function createWorkspace(workspace: Omit<Workspace, "created_at">): Workspace {
+  const stmt = getDb().prepare(`
+    INSERT INTO workspaces (id, repository_id, branch, directory_path)
+    VALUES (?, ?, ?, ?)
+  `);
+  stmt.run(workspace.id, workspace.repository_id, workspace.branch, workspace.directory_path);
+  return getWorkspace(workspace.id)!;
+}
+
+export function getWorkspace(id: string): Workspace | undefined {
+  return getDb().prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as Workspace | undefined;
+}
+
+export function getWorkspaceByBranch(repositoryId: string, branch: string): Workspace | undefined {
+  return getDb().prepare("SELECT * FROM workspaces WHERE repository_id = ? AND branch = ?").get(repositoryId, branch) as Workspace | undefined;
+}
+
+export function getRepositoryWorkspaces(repositoryId: string): Workspace[] {
+  return getDb().prepare(`
+    SELECT * FROM workspaces WHERE repository_id = ? ORDER BY branch ASC
+  `).all(repositoryId) as Workspace[];
+}
+
+export function getWorkspaceWithRepo(id: string): WorkspaceWithRepo | undefined {
+  return getDb().prepare(`
+    SELECT w.*, r.name as repo_name, r.git_url as repo_git_url
+    FROM workspaces w
+    JOIN repositories r ON w.repository_id = r.id
+    WHERE w.id = ?
+  `).get(id) as WorkspaceWithRepo | undefined;
+}
+
+export function deleteWorkspace(id: string): void {
+  getDb().prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+}
+
+// Get sessions for a workspace
+export function getWorkspaceSessions(workspaceId: string): TerminalSession[] {
+  return getDb().prepare(`
+    SELECT * FROM terminal_sessions WHERE workspace_id = ? ORDER BY last_activity_at DESC
+  `).all(workspaceId) as TerminalSession[];
 }

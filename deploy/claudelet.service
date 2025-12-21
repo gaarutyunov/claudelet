@@ -1,0 +1,29 @@
+[Unit]
+Description=Claudelet - Remote Claude Code Web Interface
+After=network.target
+
+[Service]
+Type=simple
+User=claudelet
+Group=claudelet
+ExecStart=/usr/bin/claudelet --workdir /var/lib/claudelet
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=HOST=0.0.0.0
+
+# Security - set these in /etc/claudelet/env
+EnvironmentFile=-/etc/claudelet/env
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/claudelet
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

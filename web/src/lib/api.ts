@@ -14,7 +14,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = useAuthStore.getState().token;
 
   const headers = new Headers(options.headers);
-  headers.set("Content-Type", "application/json");
+
+  // Only set Content-Type for requests with body
+  if (options.body) {
+    headers.set("Content-Type", "application/json");
+  }
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -63,4 +67,11 @@ export function getWebSocketUrl(sessionId: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
   return `${protocol}//${host}/api/terminal/${sessionId}/ws?token=${token}`;
+}
+
+export function getChatWebSocketUrl(sessionId: string): string {
+  const token = useAuthStore.getState().token;
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const host = window.location.host;
+  return `${protocol}//${host}/api/chat/${sessionId}/ws?token=${token}`;
 }
