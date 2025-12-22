@@ -37,8 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy source and dependencies (bun runs TypeScript directly)
+# Note: bun hoists all dependencies to root node_modules in workspaces
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/server/node_modules ./server/node_modules
 COPY --from=builder /app/server/src ./server/src
 COPY --from=builder /app/server/package.json ./server/
 COPY --from=builder /app/web/dist ./web/dist
