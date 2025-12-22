@@ -8,6 +8,7 @@
     "dev": "bun run --watch src/index.ts",
     "build": "echo 'Server runs TypeScript directly with bun'",
     "start": "bun run src/index.ts",
+    "start:test": "bun run src/index.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
   },

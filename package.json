@@ -12,6 +12,7 @@
     "dev": "concurrently \"bun run dev:server\" \"bun run dev:web\"",
     "dev:server": "bun run --filter @claudelet/server dev",
     "dev:web": "bun run --filter @claudelet/web dev",
+    "start:server": "bun run --filter @claudelet/server start:test",
     "build": "bun run build:web && bun run build:server",
     "build:web": "bun run --filter @claudelet/web build",
     "build:server": "bun run --filter @claudelet/server build",

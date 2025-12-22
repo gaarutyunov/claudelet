@@ -31,7 +31,7 @@ export default defineConfig({
       timeout: 30000,
     },
     {
-      command: "bun run dev:server",
+      command: "bun run start:server",
       url: "http://localhost:3001/api/health",
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
@@ -41,6 +41,7 @@ export default defineConfig({
         SESSION_SECRET: "test-secret-for-e2e-testing-minimum-32-chars",
         ANTHROPIC_BASE_URL: "http://localhost:4010",
         OAUTH_ISSUER: "http://localhost:8080",
+        CORS_ORIGINS: "http://localhost:5173,http://localhost:3001",
       },
     },
     {
