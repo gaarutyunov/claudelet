@@ -19,7 +19,8 @@ interface TerminalMessage {
 }
 
 export async function setupTerminalRoutes(fastify: FastifyInstance): Promise<void> {
-  const workspaceManager = new WorkspaceManager();
+  // WorkspaceManager will be used for container-based workspaces in the future
+  const _workspaceManager = new WorkspaceManager();
 
   // WebSocket terminal endpoint
   fastify.get(

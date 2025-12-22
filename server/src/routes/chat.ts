@@ -101,6 +101,7 @@ export async function setupChatRoutes(fastify: FastifyInstance): Promise<void> {
           logger.info({ userId, data: data.slice(0, 200) }, "Login PTY data");
 
           // Look for OAuth URL (claude.ai or console.anthropic.com)
+          // eslint-disable-next-line no-control-regex
           const urlMatch = output.match(/https:\/\/claude\.ai\/oauth\/authorize[^\s\x1b\x07]*/);
           if (urlMatch && !resolved) {
             resolved = true;
@@ -118,6 +119,7 @@ export async function setupChatRoutes(fastify: FastifyInstance): Promise<void> {
               resolve({ success: true, message: "Login successful" });
             } else {
               // Try to find URL in final output
+              // eslint-disable-next-line no-control-regex
               const urlMatch = output.match(/https:\/\/claude\.ai\/oauth\/authorize[^\s\x1b\x07]*/);
               if (urlMatch) {
                 resolve({ loginUrl: urlMatch[0], message: "Open this URL to authenticate" });
@@ -132,6 +134,7 @@ export async function setupChatRoutes(fastify: FastifyInstance): Promise<void> {
         setTimeout(() => {
           if (!resolved) {
             resolved = true;
+            // eslint-disable-next-line no-control-regex
             const urlMatch = output.match(/https:\/\/claude\.ai\/oauth\/authorize[^\s\x1b\x07]*/);
             if (urlMatch) {
               resolve({ loginUrl: urlMatch[0], message: "Open this URL to authenticate" });
@@ -350,7 +353,7 @@ async function handleUserMessage(
         } else if (event.type === "tool_result") {
           currentToolId = null;
         }
-      } catch (e) {
+      } catch {
         // Non-JSON output, treat as text
         logger.info({ sessionId, line: line.slice(0, 100) }, "Non-JSON line from Claude");
       }
@@ -380,7 +383,7 @@ async function handleUserMessage(
       try {
         const event = JSON.parse(buffer);
         processClaudeEvent(socket, event, null);
-      } catch (e) {
+      } catch {
         // Ignore incomplete JSON
       }
     }

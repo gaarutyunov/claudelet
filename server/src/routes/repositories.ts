@@ -16,7 +16,6 @@ import {
   getRepositoryWorkspaces,
   deleteWorkspace,
   getWorkspaceSessions,
-  Repository,
 } from "../db/index.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
@@ -112,8 +111,8 @@ async function createWorktree(repoPath: string, worktreePath: string, branch: st
     // Branch might be remote-only, try to create from origin
     try {
       await execGit(["worktree", "add", worktreePath, "-b", branch, `origin/${branch}`], repoPath);
-    } catch (e) {
-      // Maybe it's a new branch
+    } catch {
+      // Maybe it's a new branch, create it locally
       await execGit(["worktree", "add", "-b", branch, worktreePath], repoPath);
     }
   }
@@ -197,7 +196,9 @@ export async function setupRepositoryRoutes(fastify: FastifyInstance): Promise<v
           if (fs.existsSync(localPath)) {
             fs.rmSync(localPath, { recursive: true, force: true });
           }
-        } catch {}
+        } catch {
+          // Cleanup failed, ignore
+        }
 
         logger.error({ error, gitUrl }, "Failed to clone repository");
         return reply.code(500).send({
@@ -341,7 +342,9 @@ export async function setupRepositoryRoutes(fastify: FastifyInstance): Promise<v
           if (fs.existsSync(worktreePath)) {
             fs.rmSync(worktreePath, { recursive: true, force: true });
           }
-        } catch {}
+        } catch {
+          // Cleanup failed, ignore
+        }
 
         logger.error({ error, repoId: id, branch }, "Failed to create workspace");
         return reply.code(500).send({
@@ -436,7 +439,9 @@ export async function setupRepositoryRoutes(fastify: FastifyInstance): Promise<v
             if (fs.existsSync(workspace.directory_path)) {
               fs.rmSync(workspace.directory_path, { recursive: true, force: true });
             }
-          } catch {}
+          } catch {
+            // Cleanup failed, ignore
+          }
         }
 
         // Remove the main repository directory

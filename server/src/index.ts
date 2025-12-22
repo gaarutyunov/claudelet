@@ -25,7 +25,7 @@ type EmbeddedAssets = { getAsset: (path: string) => Buffer | null; hasAsset: (pa
 let embeddedAssets: EmbeddedAssets | null = null;
 try {
   // Dynamic import - module only exists in compiled binary
-  // @ts-ignore - Module is generated at build time
+  // @ts-expect-error - Module is generated at build time
   embeddedAssets = await import("./embedded-assets/index.js") as EmbeddedAssets;
 } catch {
   // Embedded assets not available (development mode or standard deployment)
@@ -99,7 +99,7 @@ async function main() {
           return reply.code(404).send({ error: "Not found" });
         }
 
-        let assetPath = request.url.split("?")[0];
+        const assetPath = request.url.split("?")[0];
 
         // Try exact path first
         if (embeddedAssets!.hasAsset(assetPath)) {

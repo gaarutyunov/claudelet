@@ -188,7 +188,7 @@ export async function setupAuthRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     "/logout",
     { preHandler: [fastify.authenticate] },
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, _reply: FastifyReply) => {
       const authHeader = request.headers.authorization;
       if (authHeader?.startsWith("Bearer ")) {
         const token = authHeader.slice(7);
