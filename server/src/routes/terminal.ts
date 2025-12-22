@@ -5,7 +5,8 @@ import { validateToken } from "../middleware/auth.js";
 import { getTerminalSession, updateTerminalSession } from "../db/index.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
-import { WorkspaceManager } from "../services/workspace.js";
+// WorkspaceManager will be used for container-based workspaces in the future
+// import { WorkspaceManager } from "../services/workspace.js";
 import path from "path";
 
 // Store active PTY processes
@@ -19,9 +20,6 @@ interface TerminalMessage {
 }
 
 export async function setupTerminalRoutes(fastify: FastifyInstance): Promise<void> {
-  // WorkspaceManager will be used for container-based workspaces in the future
-  const _workspaceManager = new WorkspaceManager();
-
   // WebSocket terminal endpoint
   fastify.get(
     "/:sessionId/ws",
