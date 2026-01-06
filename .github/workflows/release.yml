@@ -1,0 +1,653 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+        type: string
+
+env:
+  BUN_VERSION: '1.1.38'
+
+jobs:
+  build-binaries:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - name: linux-x64
+            bun-target: bun-linux-x64
+          - name: linux-arm64
+            bun-target: bun-linux-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build web frontend
+        run: bun run build:web
+
+      - name: Prepare embedded assets
+        run: |
+          mkdir -p server/src/embedded-assets
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const assets = {};
+            function collect(dir, prefix = '') {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const fullPath = path.join(dir, entry.name);
+                const relativePath = path.join(prefix, entry.name);
+                if (entry.isDirectory()) {
+                  collect(fullPath, relativePath);
+                } else {
+                  assets['/' + relativePath.replace(/\\\\/g, '/')] = fs.readFileSync(fullPath).toString('base64');
+                }
+              }
+            }
+            collect('web/dist');
+            const module = \`export const EMBEDDED_ASSETS = \${JSON.stringify(assets)};
+            export function getAsset(path) { const b = EMBEDDED_ASSETS[path]; return b ? Buffer.from(b, 'base64') : null; }
+            export function hasAsset(path) { return path in EMBEDDED_ASSETS; }\`;
+            fs.writeFileSync('server/src/embedded-assets/index.ts', module);
+          "
+
+      - name: Build binary
+        run: |
+          bun build server/src/index.ts \
+            --compile \
+            --target=${{ matrix.target.bun-target }} \
+            --outfile=dist/claudelet-${{ matrix.target.name }} \
+            --minify
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudelet-${{ matrix.target.name }}
+          path: dist/claudelet-${{ matrix.target.name }}
+
+  build-deb:
+    name: Build DEB Package
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            binary: linux-x64
+          - arch: arm64
+            binary: linux-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: claudelet-${{ matrix.binary }}
+          path: ./binary
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build DEB package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          ARCH=${{ matrix.arch }}
+          PKG_DIR=claudelet_${VERSION}_${ARCH}
+
+          mkdir -p ${PKG_DIR}/DEBIAN
+          mkdir -p ${PKG_DIR}/usr/bin
+          mkdir -p ${PKG_DIR}/etc/claudelet
+          mkdir -p ${PKG_DIR}/lib/systemd/system
+          mkdir -p ${PKG_DIR}/var/lib/claudelet
+
+          # Copy binary
+          cp binary/claudelet-${{ matrix.binary }} ${PKG_DIR}/usr/bin/claudelet
+          chmod +x ${PKG_DIR}/usr/bin/claudelet
+
+          # Copy systemd service
+          cp deploy/claudelet.service ${PKG_DIR}/lib/systemd/system/
+
+          # Copy example config
+          cp deploy/env.example ${PKG_DIR}/etc/claudelet/env.example
+
+          # Create control file
+          cat > ${PKG_DIR}/DEBIAN/control << EOF
+          Package: claudelet
+          Version: ${VERSION}
+          Architecture: ${ARCH}
+          Maintainer: Claudelet Team <team@claudelet.dev>
+          Description: Remote self-hosted Claude Code from anywhere
+           Claudelet provides a web-based interface to run Claude Code
+           remotely on your own infrastructure.
+          Section: utils
+          Priority: optional
+          Depends: git
+          EOF
+
+          # Create postinst script
+          cat > ${PKG_DIR}/DEBIAN/postinst << 'EOF'
+          #!/bin/bash
+          set -e
+
+          # Create claudelet user if not exists
+          if ! id -u claudelet > /dev/null 2>&1; then
+            useradd -r -s /bin/false -d /var/lib/claudelet claudelet
+          fi
+
+          # Set permissions
+          chown -R claudelet:claudelet /var/lib/claudelet
+
+          # Copy example config if config doesn't exist
+          if [ ! -f /etc/claudelet/env ]; then
+            cp /etc/claudelet/env.example /etc/claudelet/env
+            chmod 600 /etc/claudelet/env
+          fi
+
+          # Reload systemd
+          systemctl daemon-reload
+
+          echo ""
+          echo "Claudelet installed successfully!"
+          echo ""
+          echo "Next steps:"
+          echo "1. Edit /etc/claudelet/env with your configuration"
+          echo "2. Start the service: systemctl start claudelet"
+          echo "3. Enable on boot: systemctl enable claudelet"
+          EOF
+          chmod +x ${PKG_DIR}/DEBIAN/postinst
+
+          # Create prerm script
+          cat > ${PKG_DIR}/DEBIAN/prerm << 'EOF'
+          #!/bin/bash
+          set -e
+          systemctl stop claudelet || true
+          EOF
+          chmod +x ${PKG_DIR}/DEBIAN/prerm
+
+          # Build package
+          dpkg-deb --build ${PKG_DIR}
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudelet-deb-${{ matrix.arch }}
+          path: "*.deb"
+
+  build-rpm:
+    name: Build RPM Package
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            binary: linux-x64
+          - arch: aarch64
+            binary: linux-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: claudelet-${{ matrix.binary }}
+          path: ./binary
+
+      - name: Install RPM tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build RPM package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          ARCH=${{ matrix.arch }}
+
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mkdir -p rpmbuild/BUILDROOT/claudelet-${VERSION}-1.${ARCH}
+
+          # Create directory structure
+          PKG_ROOT=rpmbuild/BUILDROOT/claudelet-${VERSION}-1.${ARCH}
+          mkdir -p ${PKG_ROOT}/usr/bin
+          mkdir -p ${PKG_ROOT}/etc/claudelet
+          mkdir -p ${PKG_ROOT}/usr/lib/systemd/system
+          mkdir -p ${PKG_ROOT}/var/lib/claudelet
+
+          # Copy files
+          cp binary/claudelet-${{ matrix.binary }} ${PKG_ROOT}/usr/bin/claudelet
+          chmod +x ${PKG_ROOT}/usr/bin/claudelet
+          cp deploy/claudelet.service ${PKG_ROOT}/usr/lib/systemd/system/
+          cp deploy/env.example ${PKG_ROOT}/etc/claudelet/
+
+          # Create spec file
+          cat > rpmbuild/SPECS/claudelet.spec << EOF
+          Name:           claudelet
+          Version:        ${VERSION}
+          Release:        1
+          Summary:        Remote self-hosted Claude Code from anywhere
+          License:        MIT
+          BuildArch:      ${ARCH}
+          Requires:       git
+
+          %description
+          Claudelet provides a web-based interface to run Claude Code
+          remotely on your own infrastructure.
+
+          %files
+          %attr(755, root, root) /usr/bin/claudelet
+          %config(noreplace) /etc/claudelet/env.example
+          /usr/lib/systemd/system/claudelet.service
+          %dir /var/lib/claudelet
+
+          %pre
+          getent group claudelet >/dev/null || groupadd -r claudelet
+          getent passwd claudelet >/dev/null || useradd -r -g claudelet -d /var/lib/claudelet -s /sbin/nologin claudelet
+
+          %post
+          if [ ! -f /etc/claudelet/env ]; then
+            cp /etc/claudelet/env.example /etc/claudelet/env
+            chmod 600 /etc/claudelet/env
+          fi
+          chown -R claudelet:claudelet /var/lib/claudelet
+          systemctl daemon-reload
+
+          %preun
+          systemctl stop claudelet || true
+
+          %postun
+          systemctl daemon-reload
+          EOF
+
+          # Build RPM
+          rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/claudelet.spec
+
+          cp rpmbuild/RPMS/${ARCH}/*.rpm .
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudelet-rpm-${{ matrix.arch }}
+          path: "*.rpm"
+
+  build-apk:
+    name: Build APK Package (Alpine)
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    container: alpine:latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            binary: linux-x64
+          - arch: aarch64
+            binary: linux-arm64
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apk add --no-cache alpine-sdk sudo git
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: claudelet-${{ matrix.binary }}
+          path: ./binary
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build APK package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          ARCH=${{ matrix.arch }}
+
+          # Setup build user
+          adduser -D builder
+          addgroup builder abuild
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+          # Create package directory
+          mkdir -p /home/builder/claudelet
+          cp -r . /home/builder/claudelet/
+          chown -R builder:builder /home/builder
+
+          # Create APKBUILD
+          cat > /home/builder/claudelet/APKBUILD << EOF
+          pkgname=claudelet
+          pkgver=${VERSION}
+          pkgrel=0
+          pkgdesc="Remote self-hosted Claude Code from anywhere"
+          url="https://github.com/gaarutyunov/claudelet"
+          arch="${ARCH}"
+          license="MIT"
+          depends="git"
+          install="\$pkgname.pre-install \$pkgname.post-install"
+
+          package() {
+            mkdir -p "\$pkgdir"/usr/bin
+            mkdir -p "\$pkgdir"/etc/claudelet
+            mkdir -p "\$pkgdir"/etc/init.d
+            mkdir -p "\$pkgdir"/var/lib/claudelet
+
+            install -m755 binary/claudelet-${{ matrix.binary }} "\$pkgdir"/usr/bin/claudelet
+            install -m644 deploy/env.example "\$pkgdir"/etc/claudelet/
+
+            # Create OpenRC init script
+            cat > "\$pkgdir"/etc/init.d/claudelet << 'INITEOF'
+          #!/sbin/openrc-run
+          name="claudelet"
+          command="/usr/bin/claudelet"
+          command_user="claudelet:claudelet"
+          command_background="yes"
+          pidfile="/run/\${RC_SVCNAME}.pid"
+          INITEOF
+            chmod +x "\$pkgdir"/etc/init.d/claudelet
+          }
+          EOF
+
+          # Create pre-install script
+          cat > /home/builder/claudelet/claudelet.pre-install << 'EOF'
+          #!/bin/sh
+          addgroup -S claudelet 2>/dev/null || true
+          adduser -S -D -H -h /var/lib/claudelet -s /sbin/nologin -G claudelet claudelet 2>/dev/null || true
+          EOF
+
+          # Create post-install script
+          cat > /home/builder/claudelet/claudelet.post-install << 'EOF'
+          #!/bin/sh
+          if [ ! -f /etc/claudelet/env ]; then
+            cp /etc/claudelet/env.example /etc/claudelet/env
+            chmod 600 /etc/claudelet/env
+          fi
+          chown -R claudelet:claudelet /var/lib/claudelet
+          EOF
+
+          # Build as builder user
+          su - builder -c "
+            cd /home/builder/claudelet
+            abuild-keygen -a -i -n
+            abuild -r
+          " || true
+
+          # Copy result
+          find /home/builder -name "*.apk" -exec cp {} . \; || true
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudelet-apk-${{ matrix.arch }}
+          path: "*.apk"
+        continue-on-error: true
+
+  build-snap:
+    name: Build Snap Package
+    needs: build-binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binary (x64)
+        uses: actions/download-artifact@v4
+        with:
+          name: claudelet-linux-x64
+          path: ./binary
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create snapcraft.yaml
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p snap
+
+          cat > snap/snapcraft.yaml << EOF
+          name: claudelet
+          version: '${VERSION}'
+          summary: Remote self-hosted Claude Code from anywhere
+          description: |
+            Claudelet provides a web-based interface to run Claude Code
+            remotely on your own infrastructure. Features include:
+            - Git repository management with branch-based workspaces
+            - Mobile-friendly chat interface
+            - Google OAuth authentication
+            - Usage tracking
+
+          grade: stable
+          confinement: strict
+          base: core22
+
+          architectures:
+            - build-on: amd64
+
+          apps:
+            claudelet:
+              command: bin/claudelet
+              daemon: simple
+              plugs:
+                - network
+                - network-bind
+                - home
+
+          parts:
+            claudelet:
+              plugin: dump
+              source: binary/
+              organize:
+                claudelet-linux-x64: bin/claudelet
+          EOF
+
+      - name: Install Snapcraft
+        uses: snapcore/action-build@v1
+        id: snapcraft
+
+      - name: Upload Snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudelet-snap
+          path: ${{ steps.snapcraft.outputs.snap }}
+
+  build-appimage:
+    name: Build AppImage
+    needs: build-binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: claudelet-linux-x64
+          path: ./binary
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build AppImage
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          # Copy binary
+          cp binary/claudelet-linux-x64 AppDir/usr/bin/claudelet
+          chmod +x AppDir/usr/bin/claudelet
+
+          # Create desktop file
+          cat > AppDir/usr/share/applications/claudelet.desktop << EOF
+          [Desktop Entry]
+          Name=Claudelet
+          Comment=Remote self-hosted Claude Code
+          Exec=claudelet
+          Terminal=true
+          Type=Application
+          Categories=Development;
+          Icon=claudelet
+          EOF
+
+          # Create simple icon (placeholder - you should add a real icon)
+          convert -size 256x256 xc:navy -fill white -gravity center -pointsize 48 -annotate 0 'C' AppDir/usr/share/icons/hicolor/256x256/apps/claudelet.png || true
+
+          # Create AppRun
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/claudelet" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          # Copy desktop and icon to root
+          cp AppDir/usr/share/applications/claudelet.desktop AppDir/
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/claudelet.png AppDir/ 2>/dev/null || touch AppDir/claudelet.png
+
+          # Download appimagetool
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+          # Build AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir claudelet-${VERSION}-x86_64.AppImage || true
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudelet-appimage
+          path: "*.AppImage"
+        continue-on-error: true
+
+  release:
+    name: Create Release
+    needs: [build-binaries, build-deb, build-rpm, build-snap]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Claudelet v${{ steps.version.outputs.version }}
+          draft: true
+          files: |
+            artifacts/**/*
+          body: |
+            ## Claudelet v${{ steps.version.outputs.version }}
+
+            ### Installation
+
+            #### Debian/Ubuntu (apt)
+            ```bash
+            sudo dpkg -i claudelet_${{ steps.version.outputs.version }}_amd64.deb
+            # or for ARM64
+            sudo dpkg -i claudelet_${{ steps.version.outputs.version }}_arm64.deb
+            ```
+
+            #### RHEL/Fedora/CentOS (dnf/yum)
+            ```bash
+            sudo rpm -i claudelet-${{ steps.version.outputs.version }}-1.x86_64.rpm
+            # or for ARM64
+            sudo rpm -i claudelet-${{ steps.version.outputs.version }}-1.aarch64.rpm
+            ```
+
+            #### Alpine (apk)
+            ```bash
+            sudo apk add --allow-untrusted claudelet-${{ steps.version.outputs.version }}-r0.apk
+            ```
+
+            #### Snap
+            ```bash
+            sudo snap install claudelet_${{ steps.version.outputs.version }}_amd64.snap --dangerous
+            ```
+
+            #### Direct Binary
+            ```bash
+            # Download and install
+            curl -L -o claudelet https://github.com/gaarutyunov/claudelet/releases/download/v${{ steps.version.outputs.version }}/claudelet-linux-x64
+            chmod +x claudelet
+            sudo mv claudelet /usr/local/bin/
+            ```
+
+            ### Configuration
+
+            After installation, edit `/etc/claudelet/env` with your settings:
+            - Set `SESSION_SECRET` to a secure random string
+            - Configure `ALLOWED_EMAILS` for access control
+            - Optionally set up Google OAuth
+
+            ### Starting the Service
+
+            ```bash
+            sudo systemctl start claudelet
+            sudo systemctl enable claudelet  # Enable on boot
+            ```

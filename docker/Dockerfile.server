@@ -1,0 +1,54 @@
+# Claudelet Server Image
+FROM oven/bun:1.1.38-slim AS builder
+
+# Install build dependencies for native modules (node-pty, better-sqlite3)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    make \
+    g++ \
+    git \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files and lockfile
+COPY package.json package-lock.json ./
+COPY server/package.json ./server/
+COPY web/package.json ./web/
+
+# Install dependencies with native module support
+RUN bun install
+
+# Copy source
+COPY . .
+
+# Build
+RUN bun run build
+
+# Production image
+FROM oven/bun:1.1.38-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy source and dependencies (bun runs TypeScript directly)
+# Note: bun hoists all dependencies to root node_modules in workspaces
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/server/src ./server/src
+COPY --from=builder /app/server/package.json ./server/
+COPY --from=builder /app/web/dist ./web/dist
+COPY --from=builder /app/package.json ./
+
+# Production environment
+ENV NODE_ENV=production \
+    PORT=3001 \
+    HOST=0.0.0.0
+
+EXPOSE 3001
+
+CMD ["bun", "run", "start"]

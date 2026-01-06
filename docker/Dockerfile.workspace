@@ -1,0 +1,47 @@
+# Claudelet Workspace Image
+# A secure, minimal container for running Claude Code sessions
+
+FROM node:20-slim
+
+# Install essential tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    openssh-client \
+    ca-certificates \
+    jq \
+    python3 \
+    python3-pip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user (handle case where GID/UID 1000 already exists from node image)
+RUN if ! getent group coder > /dev/null 2>&1; then \
+        getent group 1000 > /dev/null 2>&1 && groupmod -n coder $(getent group 1000 | cut -d: -f1) || groupadd -g 1000 coder; \
+    fi && \
+    if ! id -u coder > /dev/null 2>&1; then \
+        id -u 1000 > /dev/null 2>&1 && usermod -l coder -d /home/coder -m $(id -nu 1000) || useradd -u 1000 -g coder -m -s /bin/bash coder; \
+    fi && \
+    mkdir -p /home/coder && chown -R 1000:1000 /home/coder
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Set up directories
+RUN mkdir -p /workspace /home/coder/.claude && \
+    chown -R coder:coder /workspace /home/coder
+
+# Switch to non-root user
+USER coder
+WORKDIR /workspace
+
+# Environment
+ENV TERM=xterm-256color \
+    COLORTERM=truecolor \
+    LANG=C.UTF-8 \
+    HOME=/home/coder \
+    CLAUDE_CODE_REMOTE=1
+
+# Default command
+CMD ["/bin/bash"]

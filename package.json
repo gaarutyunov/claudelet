@@ -1,0 +1,49 @@
+{
+  "name": "claudelet",
+  "version": "0.1.0",
+  "description": "Remote self-hosted Claude Code from anywhere",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"bun run dev:server\" \"bun run dev:web\"",
+    "dev:server": "bun run --filter @claudelet/server dev",
+    "dev:web": "bun run --filter @claudelet/web dev",
+    "start:server": "bun run --filter @claudelet/server start:test",
+    "build": "bun run build:web && bun run build:server",
+    "build:web": "bun run --filter @claudelet/web build",
+    "build:server": "bun run --filter @claudelet/server build",
+    "build:binary": "bun run build && bun run scripts/build-binary.ts",
+    "start": "bun run server/src/index.ts",
+    "lint": "bun run --filter @claudelet/server lint && bun run --filter @claudelet/web lint",
+    "typecheck": "bun run --filter @claudelet/server typecheck && bun run --filter @claudelet/web typecheck",
+    "test": "bun run test:unit && bun run test:e2e",
+    "test:unit": "vitest run && bun run test:web",
+    "test:web": "bun run --filter @claudelet/web test",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "mock-server": "bun run tests/mocks/server.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@pollyjs/adapter-node-http": "^6.0.6",
+    "@pollyjs/core": "^6.0.6",
+    "@pollyjs/persister-fs": "^6.0.6",
+    "@types/bun": "^1.1.0",
+    "concurrently": "^8.2.2",
+    "msw": "^2.6.0",
+    "oauth2-mock-server": "^8.0.0",
+    "strip-ansi": "^7.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.0"
+  },
+  "trustedDependencies": [
+    "better-sqlite3",
+    "node-pty"
+  ]
+}

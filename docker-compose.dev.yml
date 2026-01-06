@@ -1,0 +1,33 @@
+version: "3.8"
+
+# Development configuration
+# Usage: docker compose -f docker-compose.dev.yml up
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - HOST=0.0.0.0
+      - SESSION_SECRET=dev-secret-not-for-production-use
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3001
+      - DB_PATH=/data/claudelet.db
+      - WORKSPACE_BASE_PATH=/data/workspaces
+      - CLAUDE_CONFIG_PATH=/data/claude-config
+      - DOCKER_SOCKET_PATH=/var/run/docker.sock
+    volumes:
+      - ./server:/app/server
+      - claudelet-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /app/server/node_modules
+    command: npm run dev:server
+    restart: unless-stopped
+
+volumes:
+  claudelet-data:
+    driver: local

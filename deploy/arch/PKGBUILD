@@ -1,0 +1,57 @@
+# Maintainer: Claudelet Team <team@claudelet.dev>
+pkgname=claudelet
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Remote self-hosted Claude Code from anywhere"
+arch=('x86_64' 'aarch64')
+url="https://github.com/gaarutyunov/claudelet"
+license=('MIT')
+depends=('git')
+backup=('etc/claudelet/env')
+source_x86_64=("https://github.com/gaarutyunov/claudelet/releases/download/v${pkgver}/claudelet-linux-x64")
+source_aarch64=("https://github.com/gaarutyunov/claudelet/releases/download/v${pkgver}/claudelet-linux-arm64")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+    cd "$srcdir"
+
+    # Install binary
+    install -Dm755 "claudelet-linux-${CARCH}" "$pkgdir/usr/bin/claudelet"
+
+    # Install systemd service
+    install -Dm644 "$startdir/claudelet.service" "$pkgdir/usr/lib/systemd/system/claudelet.service"
+
+    # Install config
+    install -Dm600 "$startdir/env.example" "$pkgdir/etc/claudelet/env.example"
+
+    # Create data directory
+    install -dm755 "$pkgdir/var/lib/claudelet"
+}
+
+post_install() {
+    # Create claudelet user
+    if ! getent passwd claudelet > /dev/null; then
+        useradd -r -s /usr/bin/nologin -d /var/lib/claudelet claudelet
+    fi
+
+    # Copy example config if needed
+    if [ ! -f /etc/claudelet/env ]; then
+        cp /etc/claudelet/env.example /etc/claudelet/env
+    fi
+
+    chown -R claudelet:claudelet /var/lib/claudelet
+
+    echo "Claudelet installed. Configure /etc/claudelet/env and run:"
+    echo "  systemctl start claudelet"
+    echo "  systemctl enable claudelet"
+}
+
+post_upgrade() {
+    post_install
+}
+
+pre_remove() {
+    systemctl stop claudelet || true
+    systemctl disable claudelet || true
+}
